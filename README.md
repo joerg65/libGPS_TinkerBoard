@@ -43,6 +43,6 @@ You can do this with adb easily:
 adb shell echo "'GPSPORT /dev/ttyACM0\nGPSSPEED 115200' > /system/etc/gps.conf"
 ```
 
-The serial device needs the permission 666. To do this on boot, there are alternatives. One is to extract the boot partition and change the file uevent.rk3288.rc and repack and flash back back to the Tinkerboard.
-The other solution is to install SuperUser, after there will be a file named 'install-recovery.sh', where you can do this.
+The serial device needs the permission 666. To do this on boot, there are alternatives. One is to extract the boot partition and change the file uevent.rk3288.rc and repack and flash back to the Tinkerboard.
+The other solution is to install SuperUser, after that, there will be a file named 'install-recovery.sh', where you can do this.
 
