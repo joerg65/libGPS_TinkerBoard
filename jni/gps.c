@@ -43,7 +43,7 @@
 #include <android/log.h>
 
 #define GPS_DEBUG  1
-#define NMEA_DEBUG 0
+#define NMEA_DEBUG 1
 #define GPS_SV_INCLUDE 1
 
 typedef enum {
@@ -270,6 +270,7 @@ nmea_reader_init( NmeaReader*  r )
 	r->nmea_callback = NULL;
 	r->status_callback = NULL;
 	r->sv_status.num_svs = 0;
+    r->fix.bearing  = 0.0f;
 	r->fix.size = sizeof(GpsLocation);
 	
 	nmea_reader_update_utc_diff( r );
@@ -431,10 +432,15 @@ nmea_reader_update_altitude( NmeaReader*  r,
 							 Token        units )
 {
 	double  alt;
+
+    D("nmea_reader_update_altitude()");
+
 	Token   tok = altitude;
 	
-	if (tok.p >= tok.end)
+	if (tok.p >= tok.end) {
+        D("nmea_reader_update_altitude() return -1");
 		return -1;
+	}
 	
 	r->fix.flags   |= GPS_LOCATION_HAS_ALTITUDE;
 	r->fix.altitude = str2float(tok.p, tok.end);
@@ -446,10 +452,13 @@ nmea_reader_update_accuracy( NmeaReader*  r,
 							 Token        accuracy )
 {
 	double  acc;
+    D("nmea_reader_update_accuracy()");
 	Token   tok = accuracy;
 	
-	if (tok.p >= tok.end)
+	if (tok.p >= tok.end) {
+        D("nmea_reader_update_accuracy() return -1");
 		return -1;
+	}
 	
 	r->fix.accuracy = str2float(tok.p, tok.end);
 	
@@ -466,13 +475,19 @@ nmea_reader_update_bearing( NmeaReader*  r,
 							Token        bearing )
 {
 	double  alt;
+    D("nmea_reader_update_bearing()");
 	Token   tok = bearing;
 	
-	if (tok.p >= tok.end)
+	if (tok.p >= tok.end) {
+        D("nmea_reader_update_bearing() return -1");
+		//workaround if sometimes the bearing information missing from gps device
+        //fake the flag and let the last known bearing:
+        r->fix.flags   |= GPS_LOCATION_HAS_BEARING;
 		return -1;
-	
+	}
 	r->fix.flags   |= GPS_LOCATION_HAS_BEARING;
 	r->fix.bearing  = str2float(tok.p, tok.end);
+
 	return 0;
 }
 
@@ -509,6 +524,7 @@ nmea_reader_encode_sv_status(NmeaReader*  r) {    // encode used_in_fix flag
 	// if num_svs is larger than GPS_MAX_SVS, set num_svs to GPS_MAX_SVS
 	if ( r->sv_status.num_svs > GPS_MAX_SVS)     
 		r->sv_status.num_svs = GPS_MAX_SVS;      // this will prevent overflow crash
+        D("r->sv_status.num_svs: %d", r->sv_status.num_svs);
 		for ( i = 0; i < r->sv_status.num_svs; ++i)
 		{
 			GpsSvInfo *info = &(r->sv_status.sv_list[i]);
@@ -579,7 +595,7 @@ nmea_reader_parse( NmeaReader*  r )
 		Token  tok_altitude      = nmea_tokenizer_get(tzer,9);
 		Token  tok_altitudeUnits = nmea_tokenizer_get(tzer,10);
 		
-		if (tok_isPix.p[0] == '1') {
+		if (tok_isPix.p[0] > '0') {
 			nmea_reader_update_time(r, tok_time);
 			nmea_reader_update_latlong(r, tok_latitude,
 									   tok_latitudeHemi.p[0],
@@ -643,7 +659,7 @@ nmea_reader_parse( NmeaReader*  r )
 			nmea_reader_update_speed  ( r, tok_speed );
 		}
 		#if GPS_SV_INCLUDE
-		r->sv_status_changed = 1;   // update sv status when receive gps, that's last sv status.
+		//r->sv_status_changed = 1;   // update sv status when receive gps, that's last sv status.
 		#endif
 		
 	} else if ( !memcmp(tok.p, "GSV", 3) ) {
@@ -699,29 +715,20 @@ nmea_reader_parse( NmeaReader*  r )
 			D("GSV message with total satellites %d", noSatellites);   
 			
 		}
-		//       else if (noSatellites == 0) { 
-		
-		// 	D("%s: GSV message, There are no satellites %d", __FUNCTION__, noSatellites);   
-		// 	//[SMIT] wwwen: While we can't get Satellites, we report a simular Satellites(10) to test UART 
-		// 	//r->sv_status_changed = 1; 
-		// 	r->sv_status.num_svs = 0; 
-		// 	r->sv_status.sv_list[0].prn = 10;
-		// 	r->sv_status.sv_list[0].elevation = 0; 
-		// 	r->sv_status.sv_list[0].azimuth = 0; 
-		// 	r->sv_status.sv_list[0].snr = -1;
-		// 	r->sv_status.num_svs += 1;
-		// }    
 		
 		#endif
 	}else {
 		tok.p -= 2;
 		D("unknown sentence '%.*s", tok.end-tok.p, tok.p);
 	}
-	if (r->fix.flags & GPS_LOCATION_HAS_LAT_LONG) {
-		r->fix.flags |=GPS_LOCATION_HAS_SPEED;  
-		r->fix.flags |=GPS_LOCATION_HAS_ACCURACY;  
-		r->fix.flags |=GPS_LOCATION_HAS_BEARING;  
-		r->fix.flags |=GPS_LOCATION_HAS_ALTITUDE;  
+    int check = 1;
+    D("r->fix.flags: %d", r->fix.flags);
+    if ((r->fix.flags & GPS_LOCATION_HAS_LAT_LONG) == 0) check = 0;
+    if ((r->fix.flags & GPS_LOCATION_HAS_ACCURACY) == 0) check = 0;
+    if ((r->fix.flags & GPS_LOCATION_HAS_SPEED) == 0) check = 0;
+    if ((r->fix.flags & GPS_LOCATION_HAS_BEARING) == 0) check = 0;
+    if ((r->fix.flags & GPS_LOCATION_HAS_ALTITUDE) == 0) check = 0;
+	if (check != 0) {
 		#if GPS_DEBUG
 		char   temp[256];
 		char*  p   = temp;
@@ -758,10 +765,6 @@ nmea_reader_parse( NmeaReader*  r )
 		else {
 			D("no callback, keeping data until needed !");
 		}
-		// if (r->status_callback) {
-		//     r->status.status = GPS_STATUS_ENGINE_OFF;
-		//     r->status_callback(&r->status);
-		// }
 	}
 	#if GPS_SV_INCLUDE
 	if ( r->sv_status_changed == 1 ) {
